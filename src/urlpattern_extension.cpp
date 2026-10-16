@@ -383,37 +383,37 @@ struct UrlpatternInitBindData : public FunctionData {
 // scalar bind callback with a single BindScalarFunctionInput &, so the callback
 // itself cannot have one signature on both lines. CompatScalarBind adapts this
 // body to whichever shape bind_scalar_function_t names (see duckdb_compat.hpp).
-static unique_ptr<FunctionData> UrlpatternInitBindBody(vector<unique_ptr<Expression>> &arguments) {
+static unique_ptr<FunctionData> UrlpatternInitBindBody(vector<unique_ptr<Expression>> &arguments,
+                                                       const compat_arg_names_t &arg_names) {
 	auto bind_data = make_uniq<UrlpatternInitBindData>();
 
 	for (idx_t i = 0; i < arguments.size(); i++) {
-		auto &arg = arguments[i];
-		if (!arg->GetAlias().empty()) {
-			if (arg->GetAlias() == "protocol") {
+		if (!arg_names[i].empty()) {
+			if (arg_names[i] == "protocol") {
 				bind_data->protocol_idx = i;
-			} else if (arg->GetAlias() == "username") {
+			} else if (arg_names[i] == "username") {
 				bind_data->username_idx = i;
-			} else if (arg->GetAlias() == "password") {
+			} else if (arg_names[i] == "password") {
 				bind_data->password_idx = i;
-			} else if (arg->GetAlias() == "hostname") {
+			} else if (arg_names[i] == "hostname") {
 				bind_data->hostname_idx = i;
-			} else if (arg->GetAlias() == "port") {
+			} else if (arg_names[i] == "port") {
 				bind_data->port_idx = i;
-			} else if (arg->GetAlias() == "pathname") {
+			} else if (arg_names[i] == "pathname") {
 				bind_data->pathname_idx = i;
-			} else if (arg->GetAlias() == "search") {
+			} else if (arg_names[i] == "search") {
 				bind_data->search_idx = i;
-			} else if (arg->GetAlias() == "hash") {
+			} else if (arg_names[i] == "hash") {
 				bind_data->hash_idx = i;
-			} else if (arg->GetAlias() == "ignore_case") {
+			} else if (arg_names[i] == "ignore_case") {
 				bind_data->ignore_case_idx = i;
-			} else if (arg->GetAlias() == "base_url" || arg->GetAlias() == "base") {
+			} else if (arg_names[i] == "base_url" || arg_names[i] == "base") {
 				bind_data->base_url_idx = i;
 			} else {
 				throw BinderException(
 				    "Unknown parameter '%s' for urlpattern_init. Valid parameters: protocol, "
 				    "username, password, hostname, port, pathname, search, hash, ignore_case, base_url",
-				    arg->GetAlias());
+				    arg_names[i]);
 			}
 		}
 	}
@@ -1399,38 +1399,38 @@ static std::string BuildQueryString(const Value &map_value, bool encode) {
 // scalar bind callback with a single BindScalarFunctionInput &, so the callback
 // itself cannot have one signature on both lines. CompatScalarBind adapts this
 // body to whichever shape bind_scalar_function_t names (see duckdb_compat.hpp).
-static unique_ptr<FunctionData> UrlBuildBindBody(vector<unique_ptr<Expression>> &arguments) {
+static unique_ptr<FunctionData> UrlBuildBindBody(vector<unique_ptr<Expression>> &arguments,
+                                                 const compat_arg_names_t &arg_names) {
 	auto bind_data = make_uniq<UrlBuildBindData>();
 	bind_data->is_modify = false;
 
 	for (idx_t i = 0; i < arguments.size(); i++) {
-		auto &arg = arguments[i];
-		if (!arg->GetAlias().empty()) {
-			if (arg->GetAlias() == "protocol") {
+		if (!arg_names[i].empty()) {
+			if (arg_names[i] == "protocol") {
 				bind_data->protocol_idx = i;
-			} else if (arg->GetAlias() == "username") {
+			} else if (arg_names[i] == "username") {
 				bind_data->username_idx = i;
-			} else if (arg->GetAlias() == "password") {
+			} else if (arg_names[i] == "password") {
 				bind_data->password_idx = i;
-			} else if (arg->GetAlias() == "hostname") {
+			} else if (arg_names[i] == "hostname") {
 				bind_data->hostname_idx = i;
-			} else if (arg->GetAlias() == "port") {
+			} else if (arg_names[i] == "port") {
 				bind_data->port_idx = i;
-			} else if (arg->GetAlias() == "pathname") {
+			} else if (arg_names[i] == "pathname") {
 				bind_data->pathname_idx = i;
-			} else if (arg->GetAlias() == "search") {
+			} else if (arg_names[i] == "search") {
 				bind_data->search_idx = i;
-			} else if (arg->GetAlias() == "search_params") {
+			} else if (arg_names[i] == "search_params") {
 				bind_data->search_params_idx = i;
-			} else if (arg->GetAlias() == "hash") {
+			} else if (arg_names[i] == "hash") {
 				bind_data->hash_idx = i;
-			} else if (arg->GetAlias() == "encode") {
+			} else if (arg_names[i] == "encode") {
 				bind_data->encode_idx = i;
 			} else {
 				throw BinderException(
 				    "Unknown parameter '%s' for url_build. Valid parameters: protocol, "
 				    "username, password, hostname, port, pathname, search, search_params, hash, encode",
-				    arg->GetAlias());
+				    arg_names[i]);
 			}
 		}
 	}
@@ -1448,7 +1448,8 @@ static unique_ptr<FunctionData> UrlBuildBindBody(vector<unique_ptr<Expression>> 
 // scalar bind callback with a single BindScalarFunctionInput &, so the callback
 // itself cannot have one signature on both lines. CompatScalarBind adapts this
 // body to whichever shape bind_scalar_function_t names (see duckdb_compat.hpp).
-static unique_ptr<FunctionData> UrlModifyBindBody(vector<unique_ptr<Expression>> &arguments) {
+static unique_ptr<FunctionData> UrlModifyBindBody(vector<unique_ptr<Expression>> &arguments,
+                                                  const compat_arg_names_t &arg_names) {
 	auto bind_data = make_uniq<UrlBuildBindData>();
 	bind_data->is_modify = true;
 
@@ -1456,8 +1457,7 @@ static unique_ptr<FunctionData> UrlModifyBindBody(vector<unique_ptr<Expression>>
 	bool found_url = false;
 
 	for (idx_t i = 0; i < arguments.size(); i++) {
-		auto &arg = arguments[i];
-		if (arg->GetAlias().empty()) {
+		if (arg_names[i].empty()) {
 			// Positional argument - should be the URL
 			if (!found_url) {
 				bind_data->url_idx = i;
@@ -1465,30 +1465,30 @@ static unique_ptr<FunctionData> UrlModifyBindBody(vector<unique_ptr<Expression>>
 			} else {
 				throw BinderException("url_modify takes exactly one positional argument (the URL to modify)");
 			}
-		} else if (arg->GetAlias() == "protocol") {
+		} else if (arg_names[i] == "protocol") {
 			bind_data->protocol_idx = i;
-		} else if (arg->GetAlias() == "username") {
+		} else if (arg_names[i] == "username") {
 			bind_data->username_idx = i;
-		} else if (arg->GetAlias() == "password") {
+		} else if (arg_names[i] == "password") {
 			bind_data->password_idx = i;
-		} else if (arg->GetAlias() == "hostname") {
+		} else if (arg_names[i] == "hostname") {
 			bind_data->hostname_idx = i;
-		} else if (arg->GetAlias() == "port") {
+		} else if (arg_names[i] == "port") {
 			bind_data->port_idx = i;
-		} else if (arg->GetAlias() == "pathname") {
+		} else if (arg_names[i] == "pathname") {
 			bind_data->pathname_idx = i;
-		} else if (arg->GetAlias() == "search") {
+		} else if (arg_names[i] == "search") {
 			bind_data->search_idx = i;
-		} else if (arg->GetAlias() == "search_params") {
+		} else if (arg_names[i] == "search_params") {
 			bind_data->search_params_idx = i;
-		} else if (arg->GetAlias() == "hash") {
+		} else if (arg_names[i] == "hash") {
 			bind_data->hash_idx = i;
-		} else if (arg->GetAlias() == "encode") {
+		} else if (arg_names[i] == "encode") {
 			bind_data->encode_idx = i;
 		} else {
 			throw BinderException("Unknown parameter '%s' for url_modify. Valid parameters: protocol, "
 			                      "username, password, hostname, port, pathname, search, search_params, hash, encode",
-			                      arg->GetAlias());
+			                      arg_names[i]);
 		}
 	}
 
@@ -1776,7 +1776,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto urlpattern_init_func = ScalarFunction("urlpattern_init", {}, urlpattern_type, UrlpatternInitFunction);
 	urlpattern_init_func.SetBindCallback(CompatScalarBind<UrlpatternInitBindBody>);
 	urlpattern_init_func.SetInitStateCallback(InitURLPatternLocalState);
-	CompatSetVarArgs(urlpattern_init_func, LogicalType::ANY); // Accept VARCHAR and BOOLEAN parameters
+	// urlpattern_init(pathname := '/users/:id') -- every argument is named.
+	CompatSetKwargs(urlpattern_init_func, LogicalType::ANY); // VARCHAR and BOOLEAN components
 	urlpattern_init_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	CompatCaptureArgumentAliases(urlpattern_init_func);
 	urlpattern_init_func.SetFallible();
@@ -2018,7 +2019,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// url_build(protocol := ..., hostname := ..., ...) -> VARCHAR
 	auto url_build_func = ScalarFunction("url_build", {}, LogicalType::VARCHAR, UrlBuildFunction);
 	url_build_func.SetBindCallback(CompatScalarBind<UrlBuildBindBody>);
-	CompatSetVarArgs(url_build_func, LogicalType::ANY);
+	// url_build(protocol := 'https', ...) -- every argument is named.
+	CompatSetKwargs(url_build_func, LogicalType::ANY);
 	url_build_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	CompatCaptureArgumentAliases(url_build_func);
 	reg_scalar(url_build_func, {"options"}, "Build a URL string from named component parameters.",
@@ -2027,7 +2029,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// url_modify(url, protocol := ..., hostname := ..., ...) -> VARCHAR
 	auto url_modify_func = ScalarFunction("url_modify", {}, LogicalType::VARCHAR, UrlModifyFunction);
 	url_modify_func.SetBindCallback(CompatScalarBind<UrlModifyBindBody>);
+	// url_modify('https://...', pathname := '/v2') -- ONE positional URL plus named
+	// components, so it declares both kinds. On v1.5 both calls set the same
+	// varargs field; on v2.0 they add a VAR_POSITIONAL and a VAR_KEYWORD parameter.
 	CompatSetVarArgs(url_modify_func, LogicalType::ANY);
+	CompatSetKwargs(url_modify_func, LogicalType::ANY);
 	url_modify_func.SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	CompatCaptureArgumentAliases(url_modify_func);
 	reg_scalar(url_modify_func, {"url", "options"}, "Modify components of an existing URL string.",

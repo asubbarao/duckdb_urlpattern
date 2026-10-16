@@ -202,23 +202,75 @@ inline const FunctionData &CompatBindInfo(const EXPR &expr) {
 	}
 }
 
-// --- SimpleFunction::varargs ----------------------------------------------------
-// v1.5 exposes `varargs` as a public field and has no setter; v2.0 moves it into
-// FunctionSignature behind SetVarArgs/GetVarArgs. (`null_handling` and
-// `init_local_state` moved the same way, but those already have setters on v1.5,
-// so their call sites just use SetNullHandling/SetInitStateCallback directly.)
+// --- variadic declaration: *args and **kwargs -----------------------------------
+// v1.5 says "accepts extra arguments of this type" with ONE public field,
+// `SimpleFunction::varargs`, and there is no setter. Named arguments (`f(x := 1)`)
+// arrive as an ALIAS on each bound child expression.
+//
+// v2.0 removes the field and splits the idea into two parameter KINDS on
+// FunctionSignature (function.hpp:125-133, mirroring Python):
+//     AddArgs(name, type)    -> VAR_POSITIONAL, "*args"
+//     AddKwargs(name, type)  -> VAR_KEYWORD,    "**kwargs" -- receives every named
+//                               argument that matches no other parameter
+// and the names stop being aliases: the binder passes them to the bind callback via
+// BindFunctionInput::GetArgumentNames(), and ONLY if the function opts in with
+// FunctionProperties::requires_expression_names.
+//
+// Which kind a function wants is a semantic choice, not a mechanical rename, and
+// getting it wrong COMPILES. `url_build(protocol := 'https')` is a keyword
+// argument, so url_build wants **kwargs; declaring *args would build fine and then
+// refuse every call. DuckDB's own `union_value` is the same shape -- named
+// arguments, no positional ones -- and is declared exactly this way:
+//     fun.GetSignature().AddKwargs("kwargs", LogicalType::ANY);
+//     fun.GetProperties().SetRequiresExpressionNames(true);
+// (extension/core_functions/scalar/union/union_value.cpp). url_modify takes one
+// positional URL *and* named components, so it declares both; VAR_POSITIONAL and
+// VAR_KEYWORD coexist, each found by its own independent lookup
+// (FunctionSignature::GetArgs / GetKwargs).
+//
+// The probe is on GetSignature(), not on AddArgs/AddKwargs: it is the v2.0-only
+// entry point, and probing the thing we are about to call keeps the two branches
+// from both being viable.
 template <class T, class = void>
-struct CompatHasSetVarArgs : std::false_type {};
+struct CompatHasGetSignature : std::false_type {};
 template <class T>
-struct CompatHasSetVarArgs<T, decltype(void(std::declval<T &>().SetVarArgs(std::declval<LogicalType>())))>
-    : std::true_type {};
+struct CompatHasGetSignature<T, decltype(void(std::declval<T &>().GetSignature()))> : std::true_type {};
 
+//! The name given to the VAR_POSITIONAL parameter on v2.0. A positional argument
+//! has no caller-supplied name, so CompatArgumentNames reports it as EMPTY -- the
+//! v1.5 spelling -- and bind bodies stay written one way for both lines.
+static constexpr const char *CompatVarArgsName = "args";
+
+// A note on why neither function below ever writes the word `Identifier`.
+// AddArgs/AddKwargs take an `Identifier`, whose `const char *` constructor is
+// implicit by design ("literals in the source are identifiers by intent") while its
+// `const string &` one is explicit. Naming the type would be the obvious spelling and
+// it BREAKS v1.5: `Identifier` does not exist there, and inside a template it is a
+// NON-DEPENDENT name, so two-phase lookup requires a declaration at definition time
+// even though the call sits in a discarded `if constexpr` branch. Measured, not
+// guessed -- it cost a v1.5 build with
+//   "there are no arguments to 'Identifier' that depend on a template parameter".
+// Passing the literal keeps the name out of the template entirely.
+//! Declare "accepts extra POSITIONAL arguments of this type" (*args).
 template <class FUNC>
 inline void CompatSetVarArgs(FUNC &func, LogicalType varargs) {
-	if constexpr (CompatHasSetVarArgs<FUNC>::value) {
-		func.SetVarArgs(std::move(varargs));
+	if constexpr (CompatHasGetSignature<FUNC>::value) {
+		func.GetSignature().AddArgs(CompatVarArgsName, std::move(varargs));
 	} else {
 		func.varargs = std::move(varargs);
+	}
+}
+
+//! Declare "accepts arbitrary NAMED arguments of this type" (**kwargs), and ask the
+//! binder to resolve their names. On v1.5 both halves are the one varargs field
+//! plus aliases, which are always captured.
+template <class FUNC>
+inline void CompatSetKwargs(FUNC &func, LogicalType kwargs) {
+	if constexpr (CompatHasGetSignature<FUNC>::value) {
+		func.GetSignature().AddKwargs("kwargs", std::move(kwargs));
+		func.GetProperties().SetRequiresExpressionNames(true);
+	} else {
+		func.varargs = std::move(kwargs);
 	}
 }
 
@@ -272,11 +324,67 @@ inline auto BindArguments(INPUT &input) -> decltype(input.GetArguments()) {
 
 } // namespace compat_bind_detail
 
-using compat_bind_body_t = unique_ptr<FunctionData> (*)(vector<unique_ptr<Expression>> &arguments);
+//! The caller-supplied name of every argument, parallel to the argument list, with
+//! an EMPTY string where the argument was passed positionally.
+//!
+//! This exists because the NAMES moved while the arguments did not. On v1.5 a named
+//! argument's name is an alias on the bound child, readable with GetAlias(); on v2.0
+//! aliases are empty and the binder supplies names through
+//! BindFunctionInput::GetArgumentNames(). That is a SILENT runtime difference -- a
+//! bind body that reads GetAlias() compiles on v2.0 and then sees every argument as
+//! positional -- so the two sources are resolved here, once, and every bind body
+//! reads this one list.
+using compat_arg_names_t = vector<string>;
+
+namespace compat_bind_detail {
+
+// v1.5 shape: the names are the children's aliases.
+inline compat_arg_names_t BindArgumentNames(ClientContext &, ScalarFunction &,
+                                            vector<unique_ptr<Expression>> &arguments) {
+	compat_arg_names_t names;
+	names.reserve(arguments.size());
+	for (auto &arg : arguments) {
+		// static_cast, not an implicit conversion: GetAlias() yields `string` on v1.5
+		// and `Identifier` on v2.0, and Identifier's operator const string & is
+		// explicit. This overload is never CALLED on v2.0 -- aliases are empty there --
+		// but it is a plain inline function, so it is still COMPILED on both lines.
+		names.push_back(static_cast<string>(arg->GetAlias()));
+	}
+	return names;
+}
+
+// v2.0 shape. SFINAE-constrained so it is never considered on v1.5.
+template <class INPUT>
+inline auto BindArgumentNames(INPUT &input) -> decltype(input.GetArgumentNames(), compat_arg_names_t()) {
+	auto &arguments = input.GetArguments();
+	compat_arg_names_t names(arguments.size());
+	auto argument_names = input.GetArgumentNames();
+	if (!argument_names) {
+		// Names unavailable: every argument reads as positional, which is what the
+		// absence of a name means.
+		return names;
+	}
+	for (idx_t i = 0; i < names.size() && i < argument_names->size(); i++) {
+		const string &name = argument_names->operator[](i).GetIdentifierName();
+		// A positional argument is reported under the VAR_POSITIONAL parameter's own
+		// name. The caller never wrote that name, so normalise it back to empty and
+		// keep "empty means positional" true on both lines.
+		if (name != CompatVarArgsName) {
+			names[i] = name;
+		}
+	}
+	return names;
+}
+
+} // namespace compat_bind_detail
+
+using compat_bind_body_t = unique_ptr<FunctionData> (*)(vector<unique_ptr<Expression>> &arguments,
+                                                        const compat_arg_names_t &arg_names);
 
 template <compat_bind_body_t BODY, class... ARGS>
 inline unique_ptr<FunctionData> CompatScalarBind(ARGS &...args) {
-	return BODY(compat_bind_detail::BindArguments(args...));
+	const auto arg_names = compat_bind_detail::BindArgumentNames(args...);
+	return BODY(compat_bind_detail::BindArguments(args...), arg_names);
 }
 
 } // namespace duckdb
